@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ambulance Priority Signal Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1e3c72;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            color: white;
+        }
+
+        .title {
+            text-align: center;
+            margin: 10px;
+        }
+
+        .junction-container {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            background: #2d2d2d;
+            overflow: hidden;
+        }
+
+        .road-horizontal {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: 100%;
+            height: 120px;
+            background: #3c3c3c;
+            transform: translateY(-50%);
+        }
+
+        .road-vertical {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            width: 120px;
+            height: 100%;
+            background: #3c3c3c;
+            transform: translateX(-50%);
+        }
+
+        .junction-center {
+            position: absolute;
+            width: 120px;
+            height: 120px;
+            background: #444;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 3px solid #666;
+        }
+
+        .traffic-signal {
+            position: absolute;
+            width: 40px;
+            height: 100px;
+            background: #111;
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 5px;
+        }
+
+        .signal-north {
+            top: calc(50% - 170px);
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .signal-south {
+            top: calc(50% + 70px);
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .signal-east {
+            top: 50%;
+            left: calc(50% + 130px);
+            transform: translateY(-50%);
+        }
+
+        .signal-west {
+            top: 50%;
+            left: calc(50% - 170px);
+            transform: translateY(-50%);
+        }
+
+        .light {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin: 5px;
+        }
+
+        .red {
+            background: red;
+            box-shadow: 0 0 10px red;
+        }
+
+        .green {
+            background: lime;
+            box-shadow: 0 0 10px lime;
+        }
+
+        .off {
+            background: #333;
+            box-shadow: none;
+        }
+
+        .vehicle {
+            position: absolute;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+        }
+
+        .ambulance {
+            width: 60px;
+            height: 30px;
+            background: orange;
+            border: 2px solid #fff;
+            top: calc(50% - 15px);
+            left: -80px;
+            z-index: 10;
+        }
+
+        .ambulance::before {
+            content: "🚑";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .car {
+            width: 40px;
+            height: 25px;
+            background: #3498db;
+            border: 1px solid #2980b9;
+            top: calc(50% - 12px);
+            z-index: 5;
+        }
+
+        .car::before {
+            content: "🚗";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        /* Notification */
+        .notification {
+            position: absolute;
+            top: -30px;
+            left: -10px;
+            background: yellow;
+            color: black;
+            font-size: 12px;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 5px;
+            display: none;
+        }
+
+        .status-bar {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: black;
+            color: lime;
+            padding: 8px 20px;
+            border-radius: 8px;
+            font-family: "Courier New", monospace;
+            font-size: 14px;
+        }
+
+        .control-panel {
+            position: absolute;
+            bottom: 10px;
+            left: 20px;
+        }
+
+        .reset-btn {
+            background: crimson;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="title">
+        <h2>Ambulance Priority Signal Simulation</h2>
+    </div>
+    <div class="junction-container">
+        <div class="road-horizontal"></div>
+        <div class="road-vertical"></div>
+        <div class="junction-center"></div>
+
+        <!-- Signals -->
+        <div class="traffic-signal signal-north">
+            <div class="light red" id="northRed"></div>
+            <div class="light off" id="northGreen"></div>
+        </div>
+        <div class="traffic-signal signal-south">
+            <div class="light red" id="southRed"></div>
+            <div class="light off" id="southGreen"></div>
+        </div>
+        <div class="traffic-signal signal-east">
+            <div class="light green" id="eastGreen"></div>
+            <div class="light off" id="eastRed"></div>
+        </div>
+        <div class="traffic-signal signal-west">
+            <div class="light red" id="westRed"></div>
+            <div class="light off" id="westGreen"></div>
+        </div>
+
+        <!-- Vehicles -->
+        <div class="vehicle ambulance" id="ambulance"></div>
+
+        <div class="vehicle car" id="car1" style="left: 150px;">
+            <div class="notification" id="notif1">🚨 Ambulance!</div>
+        </div>
+        <div class="vehicle car" id="car2" style="left: 220px;">
+            <div class="notification" id="notif2">🚨 Ambulance!</div>
+        </div>
+
+        <!-- Status -->
+        <div class="status-bar" id="status">Status: Waiting...</div>
+        <div class="control-panel">
+            <button class="reset-btn" onclick="startDemo()">🔄 Restart Demo</button>
+        </div>
+    </div>
+
+    <script>
+        let ambPos = -80;
+        let car1Pos = 150;
+        let car2Pos = 220;
+        let car2Turning = false;
+        let emergency = false;
+        let overtaken = false;
+        let animFrame;
+
+        function setSignals(west, east, north, south) {
+            document.getElementById("westRed").className = west === "red" ? "light red" : "light off";
+            document.getElementById("westGreen").className = west === "green" ? "light green" : "light off";
+
+            document.getElementById("eastGreen").className = east === "green" ? "light green" : "light off";
+            document.getElementById("eastRed").className = east === "red" ? "light red" : "light off";
+
+            document.getElementById("northRed").className = north === "red" ? "light red" : "light off";
+            document.getElementById("northGreen").className = north === "green" ? "light green" : "light off";
+
+            document.getElementById("southRed").className = south === "red" ? "light red" : "light off";
+            document.getElementById("southGreen").className = south === "green" ? "light green" : "light off";
+        }
+
+        function move() {
+            const amb = document.getElementById("ambulance");
+            const car1 = document.getElementById("car1");
+            const car2 = document.getElementById("car2");
+
+            ambPos += overtaken ? 4 : 2; // after signal, ambulance speeds up
+            amb.style.left = ambPos + "px";
+
+            if (emergency) {
+                // Car1 moves straight
+                car1Pos += 2;
+                car1.style.left = car1Pos + "px";
+
+                // Car2 moves forward until junction (center of screen) then turns left
+                if (!car2Turning && car2Pos < window.innerWidth / 2 - 60) {
+                    car2Pos += 2;
+                    car2.style.left = car2Pos + "px";
+                } else {
+                    car2Turning = true;
+                    document.getElementById("notif2").style.display = "none"; // stop notifying car2
+                    let car2Top = parseInt(car2.style.top) || window.innerHeight / 2 - 12;
+                    car2.style.top = (car2Top + 2) + "px"; // move down (left turn)
+                }
+            }
+
+            // When ambulance crosses signal → enable overtaking
+            if (ambPos > window.innerWidth / 2 + 50 && !overtaken) {
+                overtaken = true;
+                document.getElementById("notif1").style.display = "none"; // Car1 no longer notified
+                document.getElementById("status").textContent = "Ambulance overtaking Car1...";
+            }
+
+            if (ambPos >= 80 && !emergency) {
+                emergency = true;
+                document.getElementById("status").textContent = "Ambulance Approaching → Cars Notified & GREEN!";
+                setSignals("green", "red", "red", "red"); // west green
+
+                // show notification for both cars
+                document.getElementById("notif1").style.display = "block";
+                document.getElementById("notif2").style.display = "block";
+
+                // car1 moves slightly aside
+                car1.style.top = "calc(50% - 50px)";
+            }
+
+            if (ambPos < window.innerWidth) {
+                animFrame = requestAnimationFrame(move);
+            } else {
+                document.getElementById("status").textContent = "Ambulance cleared → normal cycle";
+                setSignals("red", "green", "red", "red");
+                cancelAnimationFrame(animFrame);
+            }
+        }
+
+        function startDemo() {
+            ambPos = -80;
+            car1Pos = 150;
+            car2Pos = 220;
+            car2Turning = false;
+            overtaken = false;
+            emergency = false;
+
+            document.getElementById("ambulance").style.left = ambPos + "px";
+            document.getElementById("car1").style.left = car1Pos + "px";
+            document.getElementById("car2").style.left = car2Pos + "px";
+
+            document.getElementById("car1").style.top = "calc(50% - 12px)";
+            document.getElementById("car2").style.top = "calc(50% - 12px)";
+            document.getElementById("notif1").style.display = "none";
+            document.getElementById("notif2").style.display = "none";
+
+            setSignals("red", "green", "red", "red");
+            document.getElementById("status").textContent = "Status: Waiting...";
+            cancelAnimationFrame(animFrame);
+            move();
+        }
+
+        window.onload = () => {
+            startDemo();
+        };
+    </script>
+
+</body>
+
+</html>

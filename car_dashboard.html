@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Driver Assist — Car Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'] },
+                    animation: { 'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite' }
+                }
+            }
+        }
+    </script>
+
+    <!-- ECharts -->
+    <script src="https://unpkg.com/echarts/dist/echarts.min.js"></script>
+    <!-- MQTT.js -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+    <style>
+        body {
+            background: #0b1220;
+            color: #e6eef8;
+            overflow-x: hidden;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .pulse-red {
+            box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7);
+            animation: pulse-red 2s infinite;
+        }
+
+        @keyframes pulse-red {
+            0% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7);
+            }
+
+            70% {
+                transform: scale(1);
+                box-shadow: 0 0 0 10px rgba(220, 38, 38, 0);
+            }
+
+            100% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(220, 38, 38, 0);
+            }
+        }
+    </style>
+</head>
+
+<body class="min-h-screen font-sans flex flex-col">
+
+    <!-- 1. ACTIVATION OVERLAY (Required for Audio) -->
+    <div id="activation"
+        class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 backdrop-blur-sm">
+        <div
+            class="text-center p-8 rounded-2xl glass max-w-md border border-blue-500/30 shadow-[0_0_50px_rgba(59,130,246,0.2)]">
+            <div
+                class="mb-6 mx-auto w-16 h-16 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-400">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24"
+                    stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            </div>
+            <h1 class="text-3xl font-bold text-white mb-2">Driver Assist System</h1>
+            <p class="text-sm text-slate-400 mb-8">Initialize dashboard to enable audio alerts and real-time monitoring.
+            </p>
+            <button id="activateBtn"
+                class="w-full px-6 py-4 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-xl font-bold shadow-lg transition-all transform hover:scale-105">
+                INITIALIZE SYSTEM
+            </button>
+        </div>
+    </div>
+
+    <!-- 2. MAIN DASHBOARD -->
+    <div class="flex-1 max-w-7xl mx-auto w-full p-4 lg:p-8">
+        <!-- Header -->
+        <header class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+            <div>
+                <h2
+                    class="text-2xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">
+                    V2V DASHBOARD
+                </h2>
+                <div class="flex items-center gap-2 mt-1">
+                    <span id="connDot" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+                    <span id="connText" class="text-xs font-mono text-slate-400 uppercase tracking-widest">System
+                        Offline</span>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button id="muteBtn"
+                    class="px-4 py-2 text-xs font-bold uppercase tracking-wider bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors text-slate-300">
+                    Test Audio
+                </button>
+                <div class="px-4 py-2 bg-blue-900/20 border border-blue-500/20 rounded-lg">
+                    <span class="text-xs text-blue-400 font-mono">ZONE: BANGALORE_SOUTH</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full">
+
+            <!-- LEFT COL: Feed & Status -->
+            <div class="lg:col-span-4 flex flex-col gap-6">
+                <!-- Status Cards -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="glass p-4 rounded-xl">
+                        <div class="text-xs text-slate-400 uppercase mb-1">Alerts Detected</div>
+                        <div id="statAlerts" class="text-3xl font-bold text-white">0</div>
+                    </div>
+                    <div class="glass p-4 rounded-xl">
+                        <div class="text-xs text-slate-400 uppercase mb-1">Ambulances</div>
+                        <div id="statAmbs" class="text-3xl font-bold text-emerald-400">--</div>
+                    </div>
+                </div>
+
+                <!-- Last MQTT Message -->
+                <div class="glass p-5 rounded-xl border-l-4 border-l-blue-500">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase mb-3">Latest Signal Packet</h3>
+                    <code id="lastMsg"
+                        class="block bg-black/40 p-3 rounded-lg text-xs font-mono text-blue-200 break-all">
+                        Waiting for data stream...
+                    </code>
+                </div>
+
+                <!-- Feed -->
+                <div class="glass p-0 rounded-xl flex-1 flex flex-col overflow-hidden min-h-[300px] max-h-[370px]">
+                    <div class="p-4 border-b border-white/5 bg-white/5 flex justify-between items-center">
+                        <h3 class="font-bold text-sm">Live Event Log</h3>
+                        <button id="clearBtn"
+                            class="text-[10px] text-slate-400 hover:text-white uppercase">Clear</button>
+                    </div>
+                    <div id="alertFeed"
+                        class="p-4 space-y-3 overflow-y-auto flex-1 text-sm font-mono scrollbar-thin scrollbar-thumb-slate-700">
+                        <div class="text-center text-slate-600 italic py-4">No events recorded</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT COL: Visuals -->
+            <div class="lg:col-span-8 flex flex-col gap-6">
+                <!-- Main Distance Chart -->
+                <div class="glass p-1 rounded-xl relative group">
+                    <div class="absolute top-4 left-4 z-10">
+                        <h3 class="text-sm font-bold text-slate-300">Proximity Monitor</h3>
+                    </div>
+                    <div id="chartArea" class="w-full h-[350px] rounded-lg"></div>
+                </div>
+
+                <!-- Bottom Row: 3 Columns -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1">
+                    <!-- 1. Alert Frequency Chart -->
+                    <div class="glass p-4 rounded-xl flex flex-col">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase mb-2">Alert Frequency</h3>
+                        <div id="alertsChart" class="flex-1 min-h-[150px]"></div>
+                    </div>
+
+                    <!-- 2. New: Vehicle Telemetry (Fills the gap) -->
+                    <div class="glass p-4 rounded-xl flex flex-col relative overflow-hidden">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase mb-2 z-10">Vehicle Telemetry</h3>
+                        <div id="telemetryChart" class="absolute inset-0 top-6"></div>
+                    </div>
+
+                    <!-- 3. Active Alert Status Box -->
+                    <div id="activeAlertBox"
+                        class="glass p-6 rounded-xl flex flex-col items-center justify-center text-center border border-white/5 bg-gradient-to-br from-slate-800/50 to-slate-900/50">
+                        <div
+                            class="w-10 h-10 rounded-full bg-slate-700/50 flex items-center justify-center mb-2 text-slate-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24"
+                                stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M5 13l4 4L19 7" />
+                            </svg>
+                        </div>
+                        <h4 id="activeTitle" class="text-sm font-bold text-slate-200">Nominal</h4>
+                        <p id="activeDetail" class="text-[10px] text-slate-500 mt-1">No hazards in range</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. FULL SCREEN ALERT MODAL -->
+    <div id="fullAlert" class="hidden fixed inset-0 z-[100] bg-red-600 flex items-center justify-center animate-pulse">
+        <div class="text-center text-white p-8 max-w-2xl">
+            <div class="mx-auto w-32 h-32 bg-white rounded-full flex items-center justify-center mb-8 pulse-red">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-red-600" fill="none" viewBox="0 0 24 24"
+                    stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+            </div>
+            <h1 id="fullTitle" class="text-6xl md:text-8xl font-black mb-4 tracking-tighter">EMERGENCY</h1>
+            <p id="fullMsg" class="text-2xl md:text-4xl font-bold opacity-90 mb-12">AMBULANCE APPROACHING</p>
+            <button id="ackBtn"
+                class="bg-white text-red-600 px-10 py-5 rounded-full text-xl font-bold shadow-2xl hover:bg-gray-100 transition-transform hover:scale-105">
+                I AM MOVING ASIDE
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const MQTT_BROKER = 'wss://broker.hivemq.com:8884/mqtt'; // Using Secure WS Port
+        const MQTT_TOPIC_CAR = 'car/alert';
+        const MQTT_TOPIC_TRAFFIC = 'traffic/status';
+
+        const firebaseConfig = {
+            databaseURL: "https://iot-ambulance-traffic-default-rtdb.asia-southeast1.firebasedatabase.app"
+        };
+
+        // --- STATE ---
+        let client, audioCtx, osc, alarmInterval;
+        let isMuted = false;
+        let alertCount = 0;
+        let lastAlertTime = 0; // Timestamp of last alert
+
+        // ECharts Init
+        const chart = echarts.init(document.getElementById('chartArea'));
+        const alertsChart = echarts.init(document.getElementById('alertsChart'));
+        const telemetryChart = echarts.init(document.getElementById('telemetryChart'));
+
+        // Common Chart Options
+        const commonOptions = {
+            grid: { left: 10, right: 10, top: 40, bottom: 10, containLabel: true },
+            textStyle: { fontFamily: 'Inter' },
+        };
+
+        const chartOpt = {
+            ...commonOptions,
+            tooltip: { trigger: 'axis', backgroundColor: 'rgba(0,0,0,0.8)', borderColor: '#333', textStyle: { color: '#fff' } },
+            xAxis: {
+                type: 'category',
+                data: [],
+                axisLine: { lineStyle: { color: '#334155' } },
+                axisLabel: { color: '#94a3b8', fontSize: 10 }
+            },
+            yAxis: {
+                type: 'value',
+                splitLine: { lineStyle: { color: '#1e293b' } },
+                axisLabel: { color: '#94a3b8' }
+            },
+            series: [{
+                type: 'line',
+                data: [],
+                smooth: true,
+                symbol: 'none',
+                lineStyle: { width: 3, color: '#3b82f6' },
+                areaStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(59,130,246,0.5)' }, { offset: 1, color: 'rgba(59,130,246,0)' }])
+                }
+            }]
+        };
+
+        const alertsOpt = {
+            ...commonOptions,
+            grid: { ...commonOptions.grid, top: 10 },
+            tooltip: { show: false },
+            xAxis: { show: false, data: [] },
+            yAxis: { show: false },
+            series: [{
+                type: 'bar',
+                data: [],
+                itemStyle: { borderRadius: [4, 4, 0, 0], color: '#ef4444' },
+                barMaxWidth: 20
+            }]
+        };
+
+        const telemetryOpt = {
+            series: [{
+                type: 'gauge',
+                center: ['50%', '60%'],
+                radius: '90%',
+                startAngle: 180,
+                endAngle: 0,
+                min: 0,
+                max: 120,
+                splitNumber: 4,
+                itemStyle: { color: '#3b82f6' },
+                progress: { show: true, width: 8 },
+                pointer: { show: false },
+                axisLine: { lineStyle: { width: 8, color: [[1, '#1e293b']] } },
+                axisTick: { show: false },
+                splitLine: { length: 6, lineStyle: { width: 2, color: '#999' } },
+                axisLabel: { distance: 10, fontSize: 10, color: '#999' },
+                detail: { valueAnimation: true, offsetCenter: [0, '20%'], fontSize: 20, fontWeight: 'bolder', formatter: '{value} km/h', color: 'white' },
+                data: [{ value: 0 }]
+            }]
+        };
+
+        chart.setOption(chartOpt);
+        alertsChart.setOption(alertsOpt);
+        telemetryChart.setOption(telemetryOpt);
+        window.addEventListener('resize', () => { chart.resize(); alertsChart.resize(); telemetryChart.resize(); });
+
+        // Simulate Telemetry Data
+        setInterval(() => {
+            const speed = Math.floor(Math.random() * (65 - 55 + 1) + 55); // Random speed between 55-65
+            telemetryChart.setOption({ series: [{ data: [{ value: speed }] }] });
+        }, 2000);
+
+        // --- AUDIO SYSTEM (Oscillator) ---
+        function initAudio() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        function playSiren() {
+            if (isMuted) return;
+            initAudio();
+            if (osc) return; // Already playing
+
+            osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            osc.type = 'sawtooth';
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            osc.start();
+
+            let time = audioCtx.currentTime;
+
+            // European Siren Pattern (High-Low)
+            alarmInterval = setInterval(() => {
+                const now = audioCtx.currentTime;
+                // Ramp Frequency
+                osc.frequency.cancelScheduledValues(now);
+                osc.frequency.setValueAtTime(600, now);
+                osc.frequency.linearRampToValueAtTime(1200, now + 0.3);
+
+                // Ramp Volume
+                gainNode.gain.cancelScheduledValues(now);
+                gainNode.gain.setValueAtTime(0.1, now);
+                gainNode.gain.linearRampToValueAtTime(0.3, now + 0.1);
+                gainNode.gain.linearRampToValueAtTime(0.1, now + 0.3);
+            }, 600);
+        }
+
+        function stopSiren() {
+            if (alarmInterval) clearInterval(alarmInterval);
+            alarmInterval = null;
+            if (osc) {
+                try {
+                    osc.stop();
+                    osc.disconnect();
+                } catch (e) { }
+                osc = null;
+            }
+        }
+
+        // --- LOGIC ---
+        function logFeed(msg, isTraffic = false) {
+            const feed = document.getElementById('alertFeed');
+            const time = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+            const item = document.createElement('div');
+            item.className = `p-3 rounded-lg text-xs font-mono border-l-2 ${isTraffic ? 'bg-emerald-900/10 border-emerald-500 text-emerald-200' : 'bg-red-900/10 border-red-500 text-red-200'}`;
+            item.innerHTML = `<span class="opacity-50 mr-2">${time}</span>${msg}`;
+
+            feed.prepend(item);
+            if (feed.children.length > 50) feed.lastElementChild.remove();
+        }
+
+        function triggerAlert(title, msg) {
+            document.getElementById('fullTitle').textContent = title;
+            document.getElementById('fullMsg').textContent = msg;
+            const fullAlert = document.getElementById('fullAlert');
+
+            if (fullAlert.classList.contains('hidden')) {
+                fullAlert.classList.remove('hidden');
+                playSiren();
+            }
+
+            // Reset Watchdog Timer
+            lastAlertTime = Date.now();
+
+            // Update Active Box
+            const box = document.getElementById('activeAlertBox');
+            box.className = "glass p-6 rounded-xl flex flex-col items-center justify-center text-center border border-red-500/50 bg-red-900/20";
+            document.getElementById('activeTitle').textContent = title;
+            document.getElementById('activeDetail').textContent = msg;
+        }
+
+        function dismissAlert() {
+            document.getElementById('fullAlert').classList.add('hidden');
+            stopSiren();
+
+            // Reset Active Box
+            const box = document.getElementById('activeAlertBox');
+            box.className = "glass p-6 rounded-xl flex flex-col items-center justify-center text-center border border-white/5 bg-gradient-to-br from-slate-800/50 to-slate-900/50";
+            document.getElementById('activeTitle').textContent = "System Nominal";
+            document.getElementById('activeDetail').textContent = "No active hazards detected within range.";
+        }
+
+        // Auto-Dismiss Watchdog
+        setInterval(() => {
+            const fullAlert = document.getElementById('fullAlert');
+            // If alert is active AND more than 4 seconds have passed since last trigger
+            if (!fullAlert.classList.contains('hidden') && (Date.now() - lastAlertTime > 4000)) {
+                dismissAlert();
+            }
+        }, 1000);
+
+        function startSystem() {
+            document.getElementById('activation').classList.add('hidden');
+            initAudio();
+
+            // Play a short chirp to confirm audio
+            playSiren();
+            setTimeout(stopSiren, 200);
+
+            // Connect Services
+            firebase.initializeApp(firebaseConfig);
+            connectMQTT();
+            setupFirebaseListeners();
+        }
+
+        // --- CONNECTIVITY ---
+        function connectMQTT() {
+            document.getElementById('connText').textContent = "Connecting MQTT...";
+            client = mqtt.connect(MQTT_BROKER);
+
+            client.on('connect', () => {
+                document.getElementById('connText').textContent = "System Online";
+                document.getElementById('connText').className = "text-xs font-mono text-emerald-400 uppercase tracking-widest";
+                document.getElementById('connDot').className = "w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]";
+
+                client.subscribe([MQTT_TOPIC_CAR, MQTT_TOPIC_TRAFFIC]);
+            });
+
+            client.on('message', (topic, payload) => {
+                const msg = payload.toString();
+                document.getElementById('lastMsg').textContent = `${topic} >> ${msg}`;
+
+                if (topic === MQTT_TOPIC_CAR) {
+                    logFeed(msg, false);
+                    triggerAlert("EMERGENCY", msg);
+                } else {
+                    logFeed(msg, true);
+                }
+            });
+        }
+
+        function setupFirebaseListeners() {
+            const db = firebase.database();
+
+            // 1. Listen for new alerts (for charts)
+            db.ref('alerts').limitToLast(20).on('child_added', (snap) => {
+                const val = snap.val();
+                if (!val) return;
+
+                // Update Stats
+                alertCount++;
+                document.getElementById('statAlerts').textContent = alertCount;
+
+                // Update Charts using SYSTEM TIME, not Arduino Time
+                // Note: val.time is usually just millis() from Arduino, so we ignore it for display
+                const time = new Date().toLocaleTimeString();
+
+                // Distance Chart
+                if (val.distance) {
+                    chartOpt.xAxis.data.push(time);
+                    chartOpt.series[0].data.push(val.distance);
+                    if (chartOpt.xAxis.data.length > 20) {
+                        chartOpt.xAxis.data.shift();
+                        chartOpt.series[0].data.shift();
+                    }
+                    chart.setOption(chartOpt);
+                }
+
+                // Alert Frequency Bar
+                alertsOpt.xAxis.data.push(time);
+                alertsOpt.series[0].data.push(1);
+                if (alertsOpt.xAxis.data.length > 20) {
+                    alertsOpt.xAxis.data.shift();
+                    alertsOpt.series[0].data.shift();
+                }
+                alertsChart.setOption(alertsOpt);
+            });
+
+            // 2. Listen for active ambulance status
+            db.ref('ambulance').on('value', (snap) => {
+                const val = snap.val();
+                if (val) {
+                    document.getElementById('statAmbs').textContent = Object.keys(val).length;
+                }
+            });
+        }
+
+        // --- EVENTS ---
+        document.getElementById('activateBtn').addEventListener('click', startSystem);
+        document.getElementById('ackBtn').addEventListener('click', dismissAlert);
+        document.getElementById('clearBtn').addEventListener('click', () => document.getElementById('alertFeed').innerHTML = '');
+        document.getElementById('muteBtn').addEventListener('click', () => {
+            isMuted = !isMuted;
+            if (isMuted) stopSiren();
+            else playSiren(); // Test sound
+            setTimeout(stopSiren, 500);
+        });
+
+    </script>
+</body>
+
+</html>
