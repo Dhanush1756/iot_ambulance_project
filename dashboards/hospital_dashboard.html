@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hospital Command Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        medical: { 50: '#f0f9ff', 100: '#e0f2fe', 500: '#0ea5e9', 600: '#0284c7', 900: '#0c4a6e' },
+                        slate: { 850: '#1e293b' } // Custom dark
+                    },
+                    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+
+    <!-- Leaflet (Map) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+    <!-- ECharts -->
+    <script src="https://unpkg.com/echarts/dist/echarts.min.js"></script>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        body {
+            background: #f1f5f9;
+            color: #0f172a;
+            overflow: hidden;
+        }
+
+        .card {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .glass-nav {
+            background: #1e293b;
+            color: white;
+        }
+
+        .nav-item.active {
+            background: #3b82f6;
+            color: white;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+        }
+
+        .nav-item {
+            transition: all 0.2s;
+            color: #94a3b8;
+        }
+
+        .nav-item:hover:not(.active) {
+            background: #334155;
+            color: white;
+        }
+
+        /* Signal Lights */
+        .signal-light {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            opacity: 0.2;
+            transition: all 0.3s;
+        }
+
+        .signal-light.active {
+            opacity: 1;
+            transform: scale(1.2);
+            box-shadow: 0 0 10px currentColor;
+        }
+
+        /* Map Marker Pulse */
+        @keyframes marker-pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+            }
+
+            70% {
+                box-shadow: 0 0 0 15px rgba(239, 68, 68, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+            }
+        }
+
+        .amb-marker-icon {
+            border-radius: 50%;
+            animation: marker-pulse 2s infinite;
+            border: 2px solid white;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+
+<body class="h-screen flex font-sans">
+
+    <!-- 1. SIDEBAR NAVIGATION -->
+    <aside class="w-64 glass-nav flex flex-col z-50 shadow-2xl">
+        <div class="p-6 border-b border-slate-700 flex items-center gap-3">
+            <div class="bg-blue-500 p-2 rounded-lg"><i class="ph-bold ph-first-aid text-white text-xl"></i></div>
+            <div>
+                <h1 class="font-bold text-lg tracking-tight">MEDI-COMMAND</h1>
+                <p class="text-[10px] text-slate-400 uppercase tracking-widest">Central Node</p>
+            </div>
+        </div>
+
+        <nav class="flex-1 p-4 space-y-2">
+            <div class="text-xs font-bold text-slate-500 uppercase px-3 mb-2 mt-2">Operations</div>
+
+            <button onclick="switchTab('tracking')" id="nav-tracking"
+                class="nav-item active w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm">
+                <i class="ph-fill ph-map-trifold text-lg"></i> Live Tracking
+            </button>
+
+            <button onclick="switchTab('admin')" id="nav-admin"
+                class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm">
+                <i class="ph-fill ph-hospital text-lg"></i> Hospital Admin
+            </button>
+
+            <button onclick="switchTab('analytics')" id="nav-analytics"
+                class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm">
+                <i class="ph-fill ph-chart-line-up text-lg"></i> Analytics
+            </button>
+
+            <div class="text-xs font-bold text-slate-500 uppercase px-3 mb-2 mt-6">System</div>
+
+            <div class="px-4 py-3">
+                <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
+                    <span>Server Status</span>
+                    <span class="text-green-400">Stable</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="sys-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+                    <span id="sys-text" class="text-xs text-slate-400">Connecting...</span>
+                </div>
+            </div>
+        </nav>
+
+        <div class="p-4 border-t border-slate-700 bg-slate-800/50">
+            <div class="flex items-center gap-3">
+                <img src="https://ui-avatars.com/api/?name=Admin+User&background=0ea5e9&color=fff"
+                    class="w-8 h-8 rounded-full">
+                <div>
+                    <div class="text-sm font-bold text-white">Dr. Chief Admin</div>
+                    <div class="text-xs text-slate-400">Emergency Head</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- 2. MAIN CONTENT AREA -->
+    <main class="flex-1 flex flex-col relative overflow-hidden bg-slate-50">
+
+        <!-- Header -->
+        <header class="h-16 bg-white border-b border-slate-200 flex justify-between items-center px-8 shadow-sm z-40">
+            <div class="flex items-center gap-4">
+                <h2 id="page-title" class="text-xl font-bold text-slate-800">Live Command Center</h2>
+                <span
+                    class="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 animate-pulse">
+                    <span class="w-2 h-2 bg-red-600 rounded-full"></span> LIVE
+                </span>
+            </div>
+            <div class="flex items-center gap-6">
+                <div class="text-right">
+                    <div id="clock" class="text-lg font-bold text-slate-800 font-mono">00:00:00</div>
+                    <div id="date" class="text-xs text-slate-500 font-medium uppercase">-- --- ----</div>
+                </div>
+            </div>
+        </header>
+
+        <!-- VIEW: LIVE TRACKING (Default) -->
+        <div id="view-tracking" class="flex-1 p-6 overflow-y-auto grid grid-cols-12 gap-6 content-start">
+
+            <!-- Left: Signals & Active Alerts -->
+            <div class="col-span-12 lg:col-span-3 flex flex-col gap-6">
+                <!-- Junction Control (4 Signals) -->
+                <div class="card p-0 overflow-hidden">
+                    <div class="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                        <h3 class="font-bold text-xs text-slate-500 uppercase tracking-wider">Junction Control</h3>
+                        <span class="text-[10px] bg-slate-200 px-2 rounded text-slate-600">RV_RD_01</span>
+                    </div>
+                    <div class="p-4 grid grid-cols-2 gap-4">
+                        <!-- Signal 1 -->
+                        <div class="bg-slate-50 rounded-lg p-3 text-center border border-slate-100">
+                            <div class="text-xs font-bold text-slate-400 mb-2">SIGNAL 1</div>
+                            <div class="flex justify-center gap-2 mb-2">
+                                <div id="s1-r" class="signal-light bg-red-500 active shadow-[0_0_10px_#ef4444]"></div>
+                                <div id="s1-y" class="signal-light bg-yellow-400"></div>
+                                <div id="s1-g" class="signal-light bg-green-500"></div>
+                            </div>
+                            <div id="s1-st" class="text-sm font-black text-red-500">RED</div>
+                        </div>
+                        <!-- Signal 2 (Amb) -->
+                        <div
+                            class="bg-blue-50/50 rounded-lg p-3 text-center border border-blue-100 relative overflow-hidden">
+                            <div class="absolute top-0 right-0 bg-blue-500 text-white text-[9px] px-1 rounded-bl">
+                                PRIORITY</div>
+                            <div class="text-xs font-bold text-blue-800 mb-2">SIGNAL 2</div>
+                            <div class="flex justify-center gap-2 mb-2">
+                                <div id="s2-r" class="signal-light bg-red-500"></div>
+                                <div id="s2-y" class="signal-light bg-yellow-400"></div>
+                                <div id="s2-g" class="signal-light bg-green-500"></div>
+                            </div>
+                            <div id="s2-st" class="text-sm font-black text-slate-300">--</div>
+                        </div>
+                        <!-- Signal 3 -->
+                        <div class="bg-slate-50 rounded-lg p-3 text-center border border-slate-100">
+                            <div class="text-xs font-bold text-slate-400 mb-2">SIGNAL 3</div>
+                            <div class="flex justify-center gap-2 mb-2">
+                                <div id="s3-r" class="signal-light bg-red-500 active shadow-[0_0_10px_#ef4444]"></div>
+                                <div id="s3-y" class="signal-light bg-yellow-400"></div>
+                                <div id="s3-g" class="signal-light bg-green-500"></div>
+                            </div>
+                            <div id="s3-st" class="text-sm font-black text-red-500">RED</div>
+                        </div>
+                        <!-- Signal 4 -->
+                        <div class="bg-slate-50 rounded-lg p-3 text-center border border-slate-100">
+                            <div class="text-xs font-bold text-slate-400 mb-2">SIGNAL 4</div>
+                            <div class="flex justify-center gap-2 mb-2">
+                                <div id="s4-r" class="signal-light bg-red-500 active shadow-[0_0_10px_#ef4444]"></div>
+                                <div id="s4-y" class="signal-light bg-yellow-400"></div>
+                                <div id="s4-g" class="signal-light bg-green-500"></div>
+                            </div>
+                            <div id="s4-st" class="text-sm font-black text-red-500">RED</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Fleet -->
+                <div class="card p-0 flex-1">
+                    <div class="p-4 border-b border-slate-100 flex justify-between">
+                        <h3 class="font-bold text-xs text-slate-500 uppercase">Active Fleet</h3>
+                        <span id="fleet-count"
+                            class="text-xs font-bold text-blue-600 bg-blue-100 px-2 rounded-full">0</span>
+                    </div>
+                    <div id="fleet-list" class="p-2 space-y-2 max-h-[300px] overflow-y-auto">
+                        <div class="text-center text-xs text-slate-400 italic p-4">Scanning fleet...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center: Map -->
+            <div class="col-span-12 lg:col-span-6 relative flex flex-col">
+                <div class="card w-full h-[600px] relative shadow-lg z-0">
+                    <div id="map" class="w-full h-full rounded-xl z-0"></div>
+
+                    <!-- ETA Overlay -->
+                    <div
+                        class="absolute top-4 right-4 bg-white/90 backdrop-blur shadow-xl rounded-xl p-4 z-[400] border border-slate-200">
+                        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Estimated
+                            Arrival</div>
+                        <div class="flex items-baseline gap-1">
+                            <span id="eta-val" class="text-4xl font-black text-slate-800">--</span>
+                            <span class="text-sm font-bold text-slate-500">min</span>
+                        </div>
+                        <div class="text-[10px] text-green-600 font-bold mt-1">From RV University</div>
+                    </div>
+
+                    <!-- Critical Alert Overlay -->
+                    <div id="critical-alert"
+                        class="hidden absolute bottom-6 left-6 right-6 bg-red-600 text-white p-4 rounded-xl shadow-2xl z-[400] animate-pulse items-center gap-4">
+                        <div class="bg-white/20 p-3 rounded-full"><i class="ph-fill ph-siren text-3xl"></i></div>
+                        <div>
+                            <div class="font-black text-lg uppercase tracking-wider">Collision Risk Detected</div>
+                            <div class="text-sm text-red-100">Vehicle obstructing AMB_01 path. Signal Override Active.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Network Status (Replaces Broken Telemetry) -->
+            <div class="col-span-12 lg:col-span-3 flex flex-col gap-6">
+                <!-- Network Health Chart -->
+                <div class="card p-5 flex flex-col h-[300px]">
+                    <h3 class="font-bold text-xs text-slate-500 uppercase mb-2 flex justify-between items-center">
+                        <span>Network Latency</span>
+                        <span class="text-[10px] bg-green-100 text-green-600 px-2 rounded">Optimal</span>
+                    </h3>
+                    <div id="chart-network" class="flex-1 w-full"></div>
+                </div>
+
+                <!-- Logs -->
+                <div class="card flex-1 flex flex-col p-0 overflow-hidden">
+                    <div class="p-3 bg-slate-50 border-b border-slate-100">
+                        <h3 class="font-bold text-xs text-slate-500 uppercase">Comm Logs</h3>
+                    </div>
+                    <div id="logs" class="p-3 space-y-2 overflow-y-auto flex-1 font-mono text-[10px] bg-slate-50/50">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- VIEW: HOSPITAL ADMIN -->
+        <div id="view-admin" class="hidden flex-1 p-8 overflow-y-auto">
+            <div class="grid grid-cols-4 gap-6 mb-8">
+                <!-- KPI Cards -->
+                <div class="card p-5 border-l-4 border-blue-500">
+                    <div class="text-slate-400 text-xs font-bold uppercase mb-1">Total Admissions</div>
+                    <div class="text-3xl font-bold text-slate-800">142</div>
+                    <div class="text-green-500 text-xs font-bold mt-2 flex items-center gap-1"><i
+                            class="ph-bold ph-trend-up"></i> +12% today</div>
+                </div>
+                <div class="card p-5 border-l-4 border-red-500">
+                    <div class="text-slate-400 text-xs font-bold uppercase mb-1">Emergency Ward</div>
+                    <div class="text-3xl font-bold text-slate-800">8<span class="text-lg text-slate-400">/10</span>
+                    </div>
+                    <div class="text-red-500 text-xs font-bold mt-2">Near Capacity</div>
+                </div>
+                <div class="card p-5 border-l-4 border-purple-500">
+                    <div class="text-slate-400 text-xs font-bold uppercase mb-1">Doctors On-Call</div>
+                    <div class="text-3xl font-bold text-slate-800">18</div>
+                    <div class="text-purple-500 text-xs font-bold mt-2">Fully Staffed</div>
+                </div>
+                <div class="card p-5 border-l-4 border-orange-500">
+                    <div class="text-slate-400 text-xs font-bold uppercase mb-1">Ambulances Inbound</div>
+                    <div class="text-3xl font-bold text-slate-800">1</div>
+                    <div class="text-orange-500 text-xs font-bold mt-2">ETA 5 mins</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-12 gap-8">
+                <!-- Patient Table -->
+                <div class="col-span-8 card p-0 overflow-hidden">
+                    <div class="p-5 border-b border-slate-100 flex justify-between items-center">
+                        <h3 class="font-bold text-slate-700">Recent Emergency Admissions</h3>
+                        <button class="px-3 py-1 bg-blue-600 text-white text-xs font-bold rounded hover:bg-blue-700">Add
+                            Patient</button>
+                    </div>
+                    <table class="w-full text-sm text-left text-slate-600">
+                        <thead class="text-xs text-slate-400 uppercase bg-slate-50">
+                            <tr>
+                                <th class="px-6 py-3">ID</th>
+                                <th class="px-6 py-3">Patient Name</th>
+                                <th class="px-6 py-3">Triage</th>
+                                <th class="px-6 py-3">Doctor</th>
+                                <th class="px-6 py-3">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            <tr class="bg-white hover:bg-slate-50">
+                                <td class="px-6 py-4 font-mono">#EM-2049</td>
+                                <td class="px-6 py-4 font-medium text-slate-900">Rahul Verma</td>
+                                <td class="px-6 py-4"><span
+                                        class="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">CRITICAL</span>
+                                </td>
+                                <td class="px-6 py-4">Dr. S. Iyer</td>
+                                <td class="px-6 py-4">In Surgery</td>
+                            </tr>
+                            <tr class="bg-white hover:bg-slate-50">
+                                <td class="px-6 py-4 font-mono">#EM-2048</td>
+                                <td class="px-6 py-4 font-medium text-slate-900">Anita Desai</td>
+                                <td class="px-6 py-4"><span
+                                        class="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs font-bold">MODERATE</span>
+                                </td>
+                                <td class="px-6 py-4">Dr. K. Rao</td>
+                                <td class="px-6 py-4">Observation</td>
+                            </tr>
+                            <tr class="bg-white hover:bg-slate-50">
+                                <td class="px-6 py-4 font-mono">#EM-2047</td>
+                                <td class="px-6 py-4 font-medium text-slate-900">John Doe</td>
+                                <td class="px-6 py-4"><span
+                                        class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">STABLE</span>
+                                </td>
+                                <td class="px-6 py-4">Dr. M. Singh</td>
+                                <td class="px-6 py-4">Discharged</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Resources -->
+                <div class="col-span-4 card p-5 space-y-6">
+                    <h3 class="font-bold text-slate-700">Critical Resources</h3>
+
+                    <div>
+                        <div class="flex justify-between text-xs font-bold text-slate-500 mb-1">
+                            <span>OXYGEN SUPPLY</span>
+                            <span>84%</span>
+                        </div>
+                        <div class="w-full bg-slate-100 rounded-full h-2.5">
+                            <div class="bg-green-500 h-2.5 rounded-full" style="width: 84%"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs font-bold text-slate-500 mb-1">
+                            <span>BLOOD BANK (O+)</span>
+                            <span class="text-red-500">LOW (12 units)</span>
+                        </div>
+                        <div class="w-full bg-slate-100 rounded-full h-2.5">
+                            <div class="bg-red-500 h-2.5 rounded-full" style="width: 20%"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs font-bold text-slate-500 mb-1">
+                            <span>VENTILATORS</span>
+                            <span>2 Available</span>
+                        </div>
+                        <div class="w-full bg-slate-100 rounded-full h-2.5">
+                            <div class="bg-blue-500 h-2.5 rounded-full" style="width: 40%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- VIEW: ANALYTICS (New) -->
+        <div id="view-analytics" class="hidden flex-1 p-8 overflow-y-auto">
+            <div class="grid grid-cols-2 gap-8 mb-8">
+                <div class="card p-6 h-[400px]">
+                    <h3 class="font-bold text-slate-700 mb-4">Response Time Analysis</h3>
+                    <div id="chart-response" class="w-full h-[320px]"></div>
+                </div>
+                <div class="card p-6 h-[400px]">
+                    <h3 class="font-bold text-slate-700 mb-4">Emergency Case Distribution</h3>
+                    <div id="chart-cases" class="w-full h-[320px]"></div>
+                </div>
+            </div>
+
+            <div class="card p-6">
+                <h3 class="font-bold text-slate-700 mb-4">Driver Efficiency Report</h3>
+                <table class="w-full text-sm text-left text-slate-600">
+                    <thead class="text-xs text-slate-400 uppercase bg-slate-50">
+                        <tr>
+                            <th class="px-6 py-3">Driver</th>
+                            <th class="px-6 py-3">Avg Response</th>
+                            <th class="px-6 py-3">Rating</th>
+                            <th class="px-6 py-3">Trips Today</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="border-b border-slate-50">
+                            <td class="px-6 py-4 font-bold">Rajesh K.</td>
+                            <td class="px-6 py-4">8.2 mins</td>
+                            <td class="px-6 py-4 text-green-500">4.9/5.0</td>
+                            <td class="px-6 py-4">5</td>
+                        </tr>
+                        <tr>
+                            <td class="px-6 py-4 font-bold">Suresh M.</td>
+                            <td class="px-6 py-4">9.5 mins</td>
+                            <td class="px-6 py-4 text-blue-500">4.7/5.0</td>
+                            <td class="px-6 py-4">3</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // --- CONFIG & STATE ---
+        const firebaseConfig = {
+            databaseURL: "https://iot-ambulance-traffic-default-rtdb.asia-southeast1.firebasedatabase.app"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        // LOCATIONS
+        const HOSPITAL_LOC = [12.9719, 77.6412]; // General City Hospital Location
+        let ambLoc = [12.9242, 77.4988]; // RV University (Start)
+
+        // --- MAP INIT ---
+        const map = L.map('map', { zoomControl: false }).setView(HOSPITAL_LOC, 13);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; CARTO'
+        }).addTo(map);
+
+        const hospitalIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: "<div style='background-color:#0ea5e9; width:36px; height:36px; border-radius:50%; border:3px solid white; box-shadow:0 4px 6px rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center; color:white;'><i class='ph-bold ph-hospital text-xl'></i></div>",
+            iconSize: [36, 36],
+            iconAnchor: [18, 18]
+        });
+        const ambIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: "<div style='background-color:#ef4444; width:36px; height:36px; border-radius:50%; border:3px solid white; box-shadow:0 4px 6px rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center; color:white;' class='amb-marker-icon'><i class='ph-fill ph-ambulance text-lg'></i></div>",
+            iconSize: [36, 36],
+            iconAnchor: [18, 18]
+        });
+
+        const hospMarker = L.marker(HOSPITAL_LOC, { icon: hospitalIcon }).addTo(map).bindPopup("<b>City General Hospital</b><br>Command Node");
+        let ambMarker = L.marker(ambLoc, { icon: ambIcon }).addTo(map);
+        let routeLine = L.polyline([ambLoc, HOSPITAL_LOC], { color: '#0ea5e9', weight: 4, dashArray: '10,10', opacity: 0.6 }).addTo(map);
+
+        // --- NETWORK CHART (Replaces Telemetry) ---
+        const networkChart = echarts.init(document.getElementById('chart-network'));
+        const networkOpt = {
+            grid: { top: 10, right: 10, bottom: 20, left: 30, containLabel: true },
+            xAxis: { type: 'category', data: [], boundaryGap: false, axisLabel: { fontSize: 10, color: '#94a3b8' } },
+            yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: '#f1f5f9' } }, axisLabel: { fontSize: 10, color: '#94a3b8' } },
+            series: [{ type: 'line', data: [], smooth: true, showSymbol: false, areaStyle: { color: 'rgba(34,197,94,0.1)' }, lineStyle: { color: '#22c55e' } }]
+        };
+        networkChart.setOption(networkOpt);
+
+        // Update Network Chart with simulated data
+        setInterval(() => {
+            const t = new Date().toLocaleTimeString();
+            const latency = Math.floor(Math.random() * (20 - 10 + 1) + 10); // 10-20ms
+
+            networkOpt.xAxis.data.push(t);
+            networkOpt.series[0].data.push(latency);
+
+            if (networkOpt.xAxis.data.length > 20) {
+                networkOpt.xAxis.data.shift();
+                networkOpt.series[0].data.shift();
+            }
+            networkChart.setOption(networkOpt);
+        }, 2000);
+
+        // --- ANALYTICS CHARTS INIT ---
+        const chartResponse = echarts.init(document.getElementById('chart-response'));
+        chartResponse.setOption({
+            tooltip: {},
+            xAxis: { data: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] },
+            yAxis: { name: 'Mins' },
+            series: [{ type: 'bar', data: [12, 10, 8, 9, 11, 14, 13], itemStyle: { color: '#0ea5e9' } }]
+        });
+
+        const chartCases = echarts.init(document.getElementById('chart-cases'));
+        chartCases.setOption({
+            tooltip: { trigger: 'item' },
+            series: [{
+                type: 'pie',
+                radius: ['40%', '70%'],
+                data: [
+                    { value: 45, name: 'Cardiac' },
+                    { value: 30, name: 'Trauma' },
+                    { value: 15, name: 'Respiratory' },
+                    { value: 10, name: 'Other' }
+                ],
+                emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+            }]
+        });
+
+        // --- TABS & UI LOGIC ---
+        function switchTab(tabId) {
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active', 'bg-blue-600', 'text-white'));
+            document.getElementById(`nav-${tabId}`).classList.add('active', 'bg-blue-600', 'text-white');
+
+            ['tracking', 'admin', 'analytics'].forEach(id => {
+                document.getElementById(`view-${id}`).classList.add('hidden');
+            });
+
+            document.getElementById(`view-${tabId}`).classList.remove('hidden');
+
+            if (tabId === 'tracking') {
+                document.getElementById('page-title').textContent = "Live Command Center";
+                setTimeout(() => { map.invalidateSize(); networkChart.resize(); }, 100);
+            } else if (tabId === 'admin') {
+                document.getElementById('page-title').textContent = "Hospital Administration";
+            } else if (tabId === 'analytics') {
+                document.getElementById('page-title').textContent = "Performance Analytics";
+                setTimeout(() => { chartResponse.resize(); chartCases.resize(); }, 100);
+            }
+        }
+
+        // --- TRAFFIC SIGNAL INTERLOCK LOGIC ---
+        function updateLightUI(id, state) {
+            const r = document.getElementById(`${id}-r`);
+            const y = document.getElementById(`${id}-y`);
+            const g = document.getElementById(`${id}-g`);
+            const st = document.getElementById(`${id}-st`);
+
+            if (!r || !y || !g) return;
+
+            // Reset visual state
+            [r, y, g].forEach(el => el.classList.remove('active', 'shadow-lg', 'scale-110'));
+
+            state = (state || 'RED').trim().toUpperCase();
+
+            st.textContent = state;
+
+            if (state === 'RED') {
+                r.classList.add('active');
+                st.className = "text-sm font-black text-red-500";
+            } else if (state === 'YELLOW') {
+                y.classList.add('active');
+                st.className = "text-sm font-black text-yellow-500";
+            } else if (state === 'GREEN') {
+                g.classList.add('active');
+                st.className = "text-sm font-black text-green-500";
+            }
+        }
+
+        function forceRed(excludeId) {
+            ['1', '2', '3', '4'].forEach(id => {
+                if (id !== excludeId) {
+                    updateLightUI(`s${id}`, 'RED');
+                }
+            });
+        }
+
+        function updateETA() {
+            const dist = map.distance(ambMarker.getLatLng(), hospMarker.getLatLng());
+            let mins = Math.ceil(dist / 400);
+            if (mins <= 0) mins = 1;
+            document.getElementById('eta-val').textContent = mins;
+        }
+
+        function log(msg, type = 'info') {
+            const c = document.getElementById('logs');
+            const d = document.createElement('div');
+            const t = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            d.innerHTML = `<span class="opacity-40 mr-2">${t}</span> ${msg}`;
+            d.className = `p-2 rounded bg-white border border-slate-100 text-xs ${type === 'alert' ? 'text-red-600 font-bold' : ''}`;
+            c.prepend(d);
+            if (c.children.length > 50) c.lastElementChild.remove();
+        }
+
+        // --- FIREBASE LISTENERS ---
+
+        // System Status
+        db.ref('.info/connected').on('value', s => {
+            const on = s.val();
+            document.getElementById('sys-dot').className = `w-2 h-2 rounded-full ${on ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-red-500'}`;
+            document.getElementById('sys-text').textContent = on ? 'System Online' : 'Offline';
+        });
+
+        // 4 SIGNALS LISTENER with INTERLOCK
+        ['1', '2', '3', '4'].forEach(id => {
+            db.ref(`traffic/signal${id}`).on('value', s => {
+                const v = s.val();
+                if (v && v.state) {
+                    const state = v.state.toUpperCase();
+
+                    // 1. Update this specific signal
+                    updateLightUI(`s${id}`, state);
+
+                    // 2. INTERLOCK: If this is GREEN/YELLOW, force others to RED locally
+                    // This fixes the visual "all green" issue immediately
+                    if (state === 'GREEN' || state === 'YELLOW') {
+                        forceRed(id);
+                    }
+                }
+            });
+        });
+
+        // ALERTS
+        db.ref('alerts').limitToLast(1).on('child_added', s => {
+            const v = s.val();
+            if (!v) return;
+            const dist = v.distance ? parseFloat(v.distance) : 0;
+            log(`Sensor Alert: ${dist}cm`, 'alert');
+
+            const alertBox = document.getElementById('critical-alert');
+            if (dist < 10 && dist > 0) alertBox.classList.remove('hidden');
+            else alertBox.classList.add('hidden');
+        });
+
+        // AMBULANCE LOCATION & LIST
+        db.ref('ambulance').on('value', s => {
+            const list = document.getElementById('fleet-list');
+            list.innerHTML = '';
+            const val = s.val();
+            if (!val) return;
+
+            document.getElementById('fleet-count').textContent = Object.keys(val).length;
+
+            Object.keys(val).forEach(key => {
+                const d = val[key];
+                const el = document.createElement('div');
+                el.className = "flex justify-between items-center p-2 bg-slate-50 rounded border border-slate-100 text-xs";
+                el.innerHTML = `<div><div class="font-bold text-slate-700">${key}</div><div class="text-[10px] text-slate-500">${d.status || 'Idle'}</div></div><div class="font-mono">${d.speed || 40}km/h</div>`;
+                list.appendChild(el);
+
+                if (key === 'AMB_01' && d.location) {
+                    const pos = [d.location.lat, d.location.lng];
+                    ambMarker.setLatLng(pos);
+                    routeLine.setLatLngs([pos, HOSPITAL_LOC]);
+                    updateETA();
+                }
+            });
+        });
+
+        // --- CLOCK ---
+        setInterval(() => {
+            const n = new Date();
+            document.getElementById('clock').textContent = n.toLocaleTimeString();
+            document.getElementById('date').textContent = n.toLocaleDateString();
+        }, 1000);
+
+        // Initial ETA calc
+        updateETA();
+
+    </script>
+</body>
+
+</html>
