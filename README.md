@@ -11,13 +11,6 @@
 
 ---
 
-## 👤 Team
-
-**Dhanush S**  
-School of Computer Science and Engineering  
-**Samved Hackathon**
-
----
 
 ## 📌 Problem Statement
 
